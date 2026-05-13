@@ -35,11 +35,12 @@ ANIME_THUMBNAILS = [
     "assets/thumbnails/thumb_9.jpg",
 ]
 
-# Diverse reactions
+# Diverse reactions - TELEGRAM COMPATIBLE ONLY
 REACTIONS_DIVERSE = [
-    "😂", "❤️", "🔥", "✨", "👏", "🎉", "😍", "🚀", "💯", "⚡",
-    "🎬", "💻", "🎨", "⭐", "💥", "🎯", "🙏", "🤩", "😎", "🎪",
-    "🎭", "🌈", "💬", "🎬", "🎸", "🍕", "🌻", "🎃", "💎", "🔎"
+    "😂", "🔥", "✨", "🎉", "😍", "🚀", "💯", "⚡",
+    "🎬", "💻", "🎨", "💥", "🎯", "😎", "🎪", "🎭",
+    "🌈", "💬", "🎸", "🍕", "🌻", "🎃", "💎", "👌",
+    "😆", "🔆", "❤", "🖤", "💜", "💚"
 ]
 
 @app.on_message(filters.command("start"))
