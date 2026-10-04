@@ -3,6 +3,7 @@ import time
 import tempfile
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from pyrogram.errors import MessageNotModified
 import random
 
 from config.settings import (
@@ -42,6 +43,19 @@ REACTIONS_DIVERSE = [
     "🌈", "💬", "🎸", "🍕", "🌻", "🎃", "💎", "👌",
     "😆", "🔆", "❤", "🖤", "💜", "💚"
 ]
+
+
+async def safe_edit_text(message: Message, text: str, **kwargs):
+    """Edit a Telegram message while ignoring duplicate-content edits.
+
+    Telegram raises MESSAGE_NOT_MODIFIED when a user taps the same inline
+    button twice or Kaggle/network latency replays the same callback. That is
+    not a real bot failure, so swallow only that specific error.
+    """
+    try:
+        return await message.edit_text(text, **kwargs)
+    except MessageNotModified:
+        return None
 
 @app.on_message(filters.command("start"))
 async def start_handler(client: Client, message: Message):
@@ -95,7 +109,8 @@ async def video_handler(client: Client, message: Message):
         "crf": 23,
         "speed": "medium",
         "resolution": "1080p",
-        "ten_bit": False
+        "ten_bit": False,
+        "is_encoding": False
     }
     
     # Send codec selection
@@ -123,12 +138,13 @@ async def callback_handler(client: Client, callback_query):
         return
     
     session = user_sessions[user_id]
+    await callback_query.answer()
     
     # Codec selection
     if data.startswith("codec_"):
         codec = data.split("_")[1]
         session["codec"] = codec
-        await callback_query.message.edit_text(
+        await safe_edit_text(callback_query.message, 
             f"✅ Codec: {codec}\n\nSelect quality (CRF):",
             reply_markup=create_crf_keyboard()
         )
@@ -137,7 +153,7 @@ async def callback_handler(client: Client, callback_query):
     elif data.startswith("crf_"):
         crf = int(data.split("_")[1])
         session["crf"] = crf
-        await callback_query.message.edit_text(
+        await safe_edit_text(callback_query.message, 
             f"✅ Quality: CRF {crf}\n\nSelect encoding speed:",
             reply_markup=create_speed_keyboard()
         )
@@ -146,7 +162,7 @@ async def callback_handler(client: Client, callback_query):
     elif data.startswith("speed_"):
         speed = data.split("_")[1]
         session["speed"] = speed
-        await callback_query.message.edit_text(
+        await safe_edit_text(callback_query.message, 
             f"✅ Speed: {speed}\n\nSelect resolution:",
             reply_markup=create_resolution_keyboard()
         )
@@ -155,18 +171,22 @@ async def callback_handler(client: Client, callback_query):
     elif data.startswith("resolution_"):
         resolution = data.split("_")[1]
         session["resolution"] = resolution
-        await callback_query.message.edit_text(
+        await safe_edit_text(callback_query.message, 
             f"✅ Resolution: {resolution}\n\nSelect color depth:",
             reply_markup=create_bitcolor_keyboard()
         )
     
     # Color depth selection
     elif data.startswith("bitcolor_"):
+        if session.get("is_encoding"):
+            return
+
         bit = int(data.split("_")[1])
         session["ten_bit"] = (bit == 10)
+        session["is_encoding"] = True
         
         # Start encoding
-        await callback_query.message.edit_text(
+        await safe_edit_text(callback_query.message, 
             f"✅ Color: {bit}-bit\n\n"
             f"⏳ **Settings Summary:**\n"
             f"• Codec: {session['codec']}\n"
@@ -178,8 +198,6 @@ async def callback_handler(client: Client, callback_query):
         )
         
         await start_encoding(client, callback_query.message, user_id)
-    
-    await callback_query.answer()
 
 async def start_encoding(client: Client, message: Message, user_id: int):
     """Start the video encoding process"""
@@ -219,7 +237,7 @@ async def start_encoding(client: Client, message: Message, user_id: int):
             return text
         
         # Encode video
-        await progress_msg.edit_text("🎬 Encoding: Starting...\n⏱️ Elapsed: 0s")
+        await safe_edit_text(progress_msg, "🎬 Encoding: Starting...\n⏱️ Elapsed: 0s")
         
         codec = CODEC_OPTIONS[session["codec"]]
         resolution = RESOLUTION_OPTIONS[session["resolution"]]
@@ -236,7 +254,8 @@ async def start_encoding(client: Client, message: Message, user_id: int):
         )
         
         if not success:
-            await progress_msg.edit_text("❌ Encoding failed!")
+            await safe_edit_text(progress_msg, "❌ Encoding failed!")
+            session["is_encoding"] = False
             cleanup_temp_files(video_path)
             return
         
@@ -245,7 +264,7 @@ async def start_encoding(client: Client, message: Message, user_id: int):
         generate_anime_thumbnail(output_path, thumbnail_path)
         
         # Upload encoded video
-        await progress_msg.edit_text("📤 Uploading encoded video...")
+        await safe_edit_text(progress_msg, "📤 Uploading encoded video...")
         
         with open(output_path, 'rb') as f:
             await client.send_video(
@@ -281,6 +300,8 @@ async def start_encoding(client: Client, message: Message, user_id: int):
         del user_sessions[user_id]
         
     except Exception as e:
+        if user_id in user_sessions:
+            user_sessions[user_id]["is_encoding"] = False
         await message.reply_text(f"❌ Error: {str(e)}")
         if user_id in user_sessions and user_sessions[user_id]["original_path"]:
             cleanup_temp_files(user_sessions[user_id]["original_path"])
